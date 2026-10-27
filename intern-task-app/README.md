@@ -1,81 +1,124 @@
-# intern-task-app
+# Intern Task App – Docker & Kubernetes
 
-`app/app.py` is a tiny, dependency-free Python HTTP service. There's no
-Dockerfile and no Kubernetes manifests yet — that's the task.
+A lightweight, dependency-free Python HTTP application containerized using Docker and deployed to a local Kubernetes cluster using kind.
 
-## Your task
+## Project Structure
 
-Fork this repo, add what's missing, and open a PR back against `main`.
-Everything for this task lives under `intern-task-app/` — you don't need
-to touch anything outside this folder:
-
-- A `Dockerfile` that builds and runs the app.
-- `k8s/deployment.yaml` and `k8s/service.yaml` that deploy it.
-
-### The app, as given
-
-- Reads its listen port from the `PORT` environment variable, defaulting to
-  `5000` if unset. Whether you override that default in your Dockerfile is
-  your call — just make sure everything downstream (container port, health
-  probes, Service `targetPort`) agrees with whatever the app actually binds
-  to at runtime.
-- Serves `/healthz` (returns `200 ok`) and `/` (returns `200`, some text).
-
-### Requirements
-
-- **Deployment** named `intern-task-app`, pods labeled `app: intern-task-app`,
-  with a readiness *and* liveness probe against `/healthz`.
-- **Service** named `intern-task-app`, selecting those pods, exposing port
-  `80` and routing it to wherever the app is actually listening.
-- Set `imagePullPolicy` appropriately — this image only ever exists locally
-  (built + `kind load`'d), there's no registry to pull from.
-- Everything should come up clean on a stock local cluster: no
-  `ImagePullBackOff`, no failing probes, no manual patching after `apply`.
-
-Nice to have, not required — if you want to show more: a non-root user in
-the image, resource requests/limits, a multi-stage build. Mention in the PR
-if you did any of this and why; we're not docking points for skipping it.
-
-## Verifying it works
-
-Any local Kubernetes works here (`kind`, `k3d`, `minikube`, Docker Desktop's
-built-in cluster). Using `kind`:
-
-```bash
-docker build -t intern-task-app:local .
-kind create cluster --name intern-task
-kind load docker-image intern-task-app:local --name intern-task
-kubectl apply -f k8s/
-kubectl rollout status deployment/intern-task-app --timeout=60s
-
-kubectl port-forward svc/intern-task-app 8080:80 &
-curl -sf localhost:8080/healthz   # expect: ok
-curl -sf localhost:8080/          # expect: hello from intern-task
+```text
+intern-task-app/
+├── app/
+│   └── app.py
+├── k8s/
+│   ├── deployment.yaml
+│   └── service.yaml
+├── Dockerfile
+└── README.md
 ```
 
-Run this (or your own equivalent) before opening the PR — don't rely on
-the diff looking right by eye.
+## Application Endpoints
 
-CI on your PR only checks that the Dockerfile builds and the k8s YAML is
-schema-valid — it never spins up a cluster or deploys anything. Passing CI
-is not the same as this actually working; the steps above are how you
-actually know.
+| Endpoint | Response |
+|---|---|
+| `/` | `hello from intern-task` |
+| `/healthz` | `ok` |
 
-## What we're looking for in the PR
+The application listens on port `5000` by default and supports configuration through the `PORT` environment variable.
 
-- The verification steps above passing is the baseline, not the bar. We're
-  looking at how you made the choices in between: why that base image, why
-  that `imagePullPolicy`, whether the probes would actually catch a real
-  failure or just rubber-stamp whatever's running.
-- Include what you ran to confirm it works in the PR description. We'll
-  re-run it ourselves too, but show your work.
-- A clear PR description and commits a reviewer could follow matter as much
-  as the YAML being correct.
+## Running with Docker
 
-## Running the app directly (without Kubernetes)
+Build the Docker image:
 
 ```bash
 docker build -t intern-task-app:local .
+```
+
+Run the container:
+
+```bash
 docker run --rm -p 8080:8080 -e PORT=8080 intern-task-app:local
+```
+
+Verify in another terminal:
+
+```bash
 curl localhost:8080/healthz
+curl localhost:8080/
+```
+
+Expected output:
+
+```text
+ok
+hello from intern-task
+```
+
+## Kubernetes Deployment
+
+Create a kind cluster:
+
+```bash
+kind create cluster --name intern-task
+```
+
+Load the locally built image:
+
+```bash
+kind load docker-image intern-task-app:local --name intern-task
+```
+
+Deploy the application:
+
+```bash
+kubectl apply -f k8s/
+```
+
+Verify deployment status:
+
+```bash
+kubectl rollout status deployment/intern-task-app --timeout=60s
+kubectl get pods
+kubectl get svc
+```
+
+Forward the Service port:
+
+```bash
+kubectl port-forward svc/intern-task-app 8080:80
+```
+
+In another terminal, verify both endpoints:
+
+```bash
+curl -sf localhost:8080/healthz
+curl -sf localhost:8080/
+```
+
+Expected output:
+
+```text
+ok
+hello from intern-task
+```
+
+## Design Decisions
+
+- **Base image:** `python:3.12-slim` provides a lightweight Python runtime without unnecessary dependencies.
+- **Non-root user:** The application runs as a dedicated non-root user (UID 10001) to improve container security.
+- **Image pull policy:** `Never` ensures Kubernetes uses the locally loaded Docker image without attempting to pull from an external registry.
+- **Readiness probe:** Checks `/healthz` to ensure the HTTP server responds before the Pod receives traffic.
+- **Liveness probe:** Checks `/healthz` and restarts the container after repeated failures. These probes detect HTTP server failures but do not check deeper dependencies.
+- **Port consistency:** The application, Deployment, and health probes use port `5000`. The ClusterIP Service exposes port `80` and forwards traffic to port `5000`.
+
+## Cleanup
+
+Delete Kubernetes resources:
+
+```bash
+kubectl delete -f k8s/
+```
+
+Delete the kind cluster:
+
+```bash
+kind delete cluster --name intern-task
 ```
