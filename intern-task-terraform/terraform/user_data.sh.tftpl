@@ -1,0 +1,42 @@
+#!/bin/bash
+set -e
+
+# Create user
+useradd -m devops
+echo "devops ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/devops
+
+# Install Docker and firewall
+apt-get update
+apt-get install -y docker.io git ufw
+systemctl enable --now docker
+
+# Get app and build image
+git clone ${repo_url} /opt/project
+cd /opt/project/intern-task-app
+docker build -t intern-app .
+
+# Create systemd service
+cat > /etc/systemd/system/intern-app.service <<'EOF'
+[Unit]
+After=docker.service
+Requires=docker.service
+
+[Service]
+Restart=always
+ExecStart=/usr/bin/docker run --rm --name intern-app --network host intern-app
+ExecStop=/usr/bin/docker stop intern-app
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Firewall
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow from ${ssh_cidr} to any port 22 proto tcp
+ufw allow 5000/tcp
+ufw --force enable
+
+# Start app automatically
+systemctl daemon-reload
+systemctl enable --now intern-app

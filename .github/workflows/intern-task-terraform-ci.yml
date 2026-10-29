@@ -4,19 +4,23 @@ on:
   pull_request:
     paths:
       - "intern-task-terraform/**"
+      - "intern-task-app/**"
+      - ".github/workflows/intern-task-terraform-ci.yml"
   push:
     branches: [main]
     paths:
       - "intern-task-terraform/**"
+      - "intern-task-app/**"
+      - ".github/workflows/intern-task-terraform-ci.yml"
   workflow_dispatch:
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: intern-task-terraform/terraform
     env:
-      # Fake, not secret — these never touch a real AWS account. They only
-      # work because the module's provider block sets skip_credentials_validation
-      # (see the task README). Nothing here is ever applied.
       AWS_ACCESS_KEY_ID: fake
       AWS_SECRET_ACCESS_KEY: fake
       AWS_DEFAULT_REGION: us-east-1
@@ -28,10 +32,13 @@ jobs:
           terraform_version: "1.12.0"
 
       - name: Format check
-        run: terraform fmt -check -recursive
+        run: terraform fmt -check
+
+      - name: Initialize
+        run: terraform init -input=false
 
       - name: Validate
         run: terraform validate
 
       - name: Plan
-        run: terraform plan
+        run: terraform plan -input=false -var="ssh_cidr=198.51.100.10/32"
