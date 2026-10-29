@@ -36,7 +36,6 @@ This prevents Terraform from modifying the instance when `user_data` changes. Ap
 ```bash
 cd intern-task-terraform/terraform
 
-terraform fmt -check
 terraform init
 terraform validate
 terraform plan -var="ssh_cidr=198.51.100.10/32"
@@ -52,11 +51,7 @@ export AWS_DEFAULT_REGION=us-east-1
 
 ## CI Pipeline Fixes
 
-Updated `.github/workflows/intern-task-terraform-ci.yml` to:
-- Run commands from the correct Terraform directory
-- Add `terraform init` before validation
-- Pass the required SSH CIDR variable during planning
-- Trigger CI when relevant files change
+Updated .github/workflows/intern-task-terraform-ci.yml to fix the working directory, initialize Terraform before validation, and pass the required SSH CIDR during planning.
 
 ## Note
 
