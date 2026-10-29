@@ -1,131 +1,63 @@
-# intern-task-terraform
+# Intern Task – Terraform
 
-Two things are missing here:
+## Overview
 
-1. A Terraform module in `terraform/` — currently empty.
-2. A working CI pipeline — `.github/workflows/intern-task-terraform-ci.yml`
-   (at the repo root, not in this folder) exists, but it's broken
-   independently of whatever Terraform you write. Fixing your Terraform
-   alone will not make it pass.
+This project uses Terraform to configure an AWS EC2 instance to run the Docker application from `intern-task-app` on port **5000**.
 
-Fork this repo, do both, and open a PR back against `main`. Everything for
-this task lives under `intern-task-terraform/` plus that one workflow
-file — you don't need to touch anything else.
+## Infrastructure
 
-Nothing here gets deployed for real — no AWS account needed, by you or by
-us. We're checking that the Terraform is valid and demonstrates the right
-concepts, not that it actually stood up infrastructure.
+Terraform defines:
+- VPC and public subnet
+- Internet Gateway and route table
+- Security Group (SSH restricted to a specific CIDR, app port 5000 open)
+- EC2 instance with a public IP
 
-To make that possible, your `provider "aws" {}` block needs three extra
-arguments: `skip_credentials_validation = true`,
-`skip_requesting_account_id = true`, `skip_region_validation = true`. This
-isn't something to figure out — it's just plumbing: it lets `terraform
-plan` compute a real plan against fake credentials without ever calling
-AWS, which is what both you and CI need since nobody has a real account
-here.
+## EC2 Setup
 
-This task builds on [`../intern-task-app/`](../intern-task-app/) — the
-instance you provision here needs to actually run the app from that task,
-not a stand-in service. You'll need that task's Dockerfile to exist (in
-your branch — it doesn't need to be merged) before this one makes sense.
-Do it first, or alongside.
+The `user_data` script:
+- Creates a non-root user with passwordless sudo
+- Installs Docker and Git
+- Clones the application repository and builds its Docker image
+- Runs the container using systemd so it restarts after reboot
+- Configures UFW firewall rules
 
-## What the Terraform module must do
+## Preventing EC2 Replacement
 
-Using the [`aws`](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
-provider, describe a single EC2 instance, bootstrapped entirely via
-`user_data` (cloud-init — no provisioner blocks).
+```hcl
+lifecycle {
+  ignore_changes = [user_data]
+}
+```
 
-**The instance itself**, via `user_data`, must:
+This prevents Terraform from modifying the instance when `user_data` changes. Applying bootstrap changes requires intentionally recreating the instance.
 
-- Create a non-root user with passwordless sudo.
-- Install Docker, then build and run (as a proper systemd-managed
-  container, survives a reboot) the image from `intern-task-app`'s
-  Dockerfile — not a generic web server. However you get the Dockerfile
-  and app source onto the instance (embed it, fetch it, whatever) is your
-  call; it just has to be the real thing, built the same way it's built in
-  the other task.
-- Configure the host's own firewall so that only the port the app
-  actually listens on is reachable — not "disable the firewall," not
-  "allow everything." That port is whatever `intern-task-app`'s Dockerfile
-  says it is, not a free choice anymore — check the other task's README
-  if you haven't done it yet.
-
-**Re-running `plan` must not show the instance needing replacement.** AWS
-can't push updated `user_data` to an instance that's already running —
-cloud-init only runs once, at first boot. The AWS provider's default
-behavior for this attribute is to treat any change to it as a reason to
-replace the instance. That means: change something unrelated elsewhere in
-your config and re-run `terraform plan` — if it now wants to destroy and
-recreate the instance because of `user_data`, you haven't solved this yet,
-even if the module looks fine on a from-scratch plan. There's more than
-one legitimate way to fix this (a resource-specific argument, or a more
-general Terraform mechanism) — either is fine, but say which you picked
-and why in the PR.
-
-**Networking:**
-
-- A VPC with a subnet, that's actually reachable from the internet — a
-  CIDR block alone doesn't make a subnet public. Think about what else is
-  required for that to be true, and make sure you've added it, not just
-  the pieces that are easy to remember.
-- A security group that only allows: SSH from one specific CIDR (make it a
-  variable, don't hardcode an IP), and the app's actual port from anywhere.
-  Nothing else. `0.0.0.0/0` on SSH is a fail here, not a shortcut.
-
-**Outputs**: the instance's public IP, and the app's port.
-
-Variables should have sensible defaults where a default makes sense (the
-AMI ID, for instance — it's never actually launched, so any plausible
-value is fine), and be required where a default would be actively
-misleading (the SSH CIDR — there's no sane default for "my IP").
-
-## What's wrong with the CI pipeline
-
-Not telling you — that's the point. Run it (via a PR — it'll run
-automatically) and read what actually fails. There's more than one issue;
-fixing the first will surface the second on the next run, not before.
-
-## Verifying it locally
-
-No AWS account, no credentials, nothing to clean up afterward — all of
-this only needs to parse and resolve correctly, never actually run.
+## Run Locally
 
 ```bash
-cd terraform
-export AWS_ACCESS_KEY_ID=fake
-export AWS_SECRET_ACCESS_KEY=fake
-export AWS_DEFAULT_REGION=us-east-1
+cd intern-task-terraform/terraform
 
 terraform fmt -check
 terraform init
 terraform validate
-terraform plan
-
-# change something unrelated, then re-plan — this must NOT show the
-# instance as needing replacement
-terraform plan
+terraform plan -var="ssh_cidr=198.51.100.10/32"
 ```
 
-Run this (or just open the PR — CI does the same thing) before asking for
-review.
+Set fake AWS credentials before running the plan:
 
-## What we're looking for in the PR
+```bash
+export AWS_ACCESS_KEY_ID=fake
+export AWS_SECRET_ACCESS_KEY=fake
+export AWS_DEFAULT_REGION=us-east-1
+```
 
-- Does the instance actually run `intern-task-app`'s container, on that
-  app's actual port — or did you build something that happens to satisfy
-  the letter of the spec with a different service entirely?
-- Is the subnet actually internet-reachable, or does it just have a CIDR
-  block and nothing that makes it public?
-- Is the security group actually least-privilege, or does it default to
-  "open SSH to the world" because that's easier to not think about?
-- How did you solve the user_data-forces-replacement problem, and can you
-  explain why that mechanism exists rather than just that it works?
-- Does the `user_data` script do what it claims — "installs and enables a
-  service" should mean the service would actually be running, not just
-  that the commands look plausible.
-- Whether you fixed the pipeline's actual structural problems or just
-  happened to write Terraform that doesn't trip over them.
-- A PR description that separates what was wrong with the pipeline from
-  what you did in the Terraform itself — two different problems, treat
-  them that way in the writeup.
+## CI Pipeline Fixes
+
+Updated `.github/workflows/intern-task-terraform-ci.yml` to:
+- Run commands from the correct Terraform directory
+- Add `terraform init` before validation
+- Pass the required SSH CIDR variable during planning
+- Trigger CI when relevant files change
+
+## Note
+
+No real AWS resources are deployed. The task only requires `terraform validate` and `terraform plan`.
